@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Heuristic Prep | NEET & JEE</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .opt { transition: all .15s; }
+  .opt:hover:not(:disabled) { border-color: #7c3aed; background: #f5f3ff; }
+  .bar { transition: width .6s; }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen">
+<div id="app"></div>
+<script>
+const S = { token: localStorage.getItem('tok'), user: null, meta: null, view: 'dashboard', exam: 'NEET',
+  learn: {}, test: null, chat: {}, voice: false, otp: { sent: false, dev: '' }, err: '' };
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const L = i => String.fromCharCode(65 + i);
+
+async function api(path, method = 'GET', body) {
+  const r = await fetch('/api' + path, { method,
+    headers: { 'Content-Type': 'application/json', ...(S.token ? { Authorization: 'Bearer ' + S.token } : {}) },
+    body: body ? JSON.stringify(body) : undefined });
+  if (!r.ok) { let d = {}; try { d = await r.json(); } catch (e) {} throw new Error(d.detail || ('Error ' + r.status)); }
+  return r.json();
+}
+
+async function boot() {
+  if (S.token) {
+    try { S.user = await api('/me'); S.meta = await api('/meta'); S.exam = S.user.exam_track === 'BOTH' ? 'NEET' : S.user.exam_track; S.view = 'dashboard'; }
+    catch (e) { S.token = null; localStorage.removeItem('tok'); }
+  }
+  render();
+}
+
+function render() { if (!S.user) return renderLogin(); renderShell(); }
+
+/* ---------------------------------------------------------- login */
+function renderLogin() {
+  $('#app').innerHTML = `
+  <div class="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-violet-50 to-indigo-100">
+   <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-8">
+    <div class="text-2xl font-bold text-violet-700">Heuristic Prep</div>
+    <div class="text-slate-500 mb-6">AI-powered NEET & JEE preparation</div>
+    ${S.err ? `<div class="bg-red-50 text-red-700 text-sm rounded p-2 mb-3">${esc(S.err)}</div>` : ''}
+    <label class="text-sm font-medium">Email</label>
+    <input id="email" type="email" class="w-full border rounded-lg p-2 mb-3" placeholder="you@school.in" ${S.otp.sent ? 'readonly' : ''} value="${esc(S.otp.email || '')}">
+    ${!S.otp.sent ? `
+      <button onclick="reqOtp()" class="w-full bg-violet-600 hover:bg-violet-700 text-white rounded-lg py-2 font-medium">Send OTP</button>`
+    : `
+      <div class="bg-amber-50 border border-amber-200 rounded-lg p-2 text-sm mb-3">Demo mode: your OTP is <b class="tracking-widest">${esc(S.otp.dev)}</b> (production sends it via email/SMS)</div>
+      ${S.otp.existing ? `<div class="bg-blue-50 text-blue-800 rounded-lg p-2 text-sm mb-3">Account found. Confirm your exam track below; this setting will be updated when you continue.</div>` : ''}
+      <label class="text-sm font-medium">OTP</label>
+      <input id="otp" class="w-full border rounded-lg p-2 mb-3" maxlength="6" placeholder="6-digit code">
+      <label class="text-sm font-medium">Name (first-time users)</label>
+      <input id="name" class="w-full border rounded-lg p-2 mb-3">
+      <div class="grid grid-cols-2 gap-3 mb-3">
+        <div><label class="text-sm font-medium">I am a</label>
+          <select id="role" class="w-full border rounded-lg p-2" onchange="$('#tc').style.display=this.value==='teacher'?'block':'none'"><option value="student" ${S.otp.existing?.role === 'student' ? 'selected' : ''}>Student</option><option value="teacher" ${S.otp.existing?.role === 'teacher' ? 'selected' : ''}>Teacher</option></select></div>
+        <div><label class="text-sm font-medium">Class</label>
+          <select id="cls" class="w-full border rounded-lg p-2"><option ${S.otp.existing?.class_level === '11' ? 'selected' : ''}>11</option><option ${!S.otp.existing || S.otp.existing.class_level === '12' ? 'selected' : ''}>12</option></select></div>
+      </div>
+      <label class="text-sm font-medium">Preparing for</label>
+      <select id="track" class="w-full border rounded-lg p-2 mb-3"><option value="NEET" ${!S.otp.existing || S.otp.existing.exam_track === 'NEET' ? 'selected' : ''}>NEET</option><option value="JEE" ${S.otp.existing?.exam_track === 'JEE' ? 'selected' : ''}>JEE (Main & Advanced)</option><option value="BOTH" ${S.otp.existing?.exam_track === 'BOTH' ? 'selected' : ''}>Both NEET & JEE</option></select>
+      <div id="tc" style="display:${S.otp.existing?.role === 'teacher' ? 'block' : 'none'}"><label class="text-sm font-medium">Teacher access code</label>
+        <input id="tcode" class="w-full border rounded-lg p-2 mb-3" placeholder="Hint for demo: VIT2026"></div>
+      <button onclick="verOtp()" class="w-full bg-violet-600 hover:bg-violet-700 text-white rounded-lg py-2 font-medium">Verify & continue</button>`}
+    <div class="text-xs text-slate-400 mt-4">Guardian consent is captured at sign-up for minors; data handled per DPDP Act, 2023.</div>
+   </div></div>`;
+}
+async function reqOtp() {
+  try { S.err = ''; const email = $('#email').value; const r = await api('/auth/request-otp', 'POST', { email });
+    S.otp = { sent: true, dev: r.dev_otp, email, existing: r.existing_user }; } catch (e) { S.err = e.message; }
+  renderLogin();
+}
+async function verOtp() {
+  try {
+    const r = await api('/auth/verify-otp', 'POST', { email: S.otp.email, otp: $('#otp').value, name: $('#name').value,
+      role: $('#role').value, exam_track: $('#track').value, class_level: $('#cls').value, teacher_code: $('#tcode')?.value });
+    S.token = r.token; localStorage.setItem('tok', r.token); S.err = ''; S.otp = { sent: false };
+    await boot();
+  } catch (e) { S.err = e.message; renderLogin(); }
+}
+function logout() { localStorage.removeItem('tok'); S.token = null; S.user = null; S.otp = { sent: false }; render(); }
+
+/* ---------------------------------------------------------- shell */
+function nav(v) { S.view = v; render(); }
+function renderShell() {
+  const u = S.user, both = u.exam_track === 'BOTH';
+  const tabs = [['dashboard', 'Dashboard'], ['learn', 'Learn'], ['test', 'Tests'], ['board', 'Leaderboard']];
+  if (u.role === 'teacher') tabs.push(['teacher', 'Teacher']);
+  $('#app').innerHTML = `
+  <header class="bg-white border-b sticky top-0 z-10"><div class="max-w-5xl mx-auto px-4 py-3 flex items-center gap-4 flex-wrap">
+    <div class="font-bold text-violet-700 text-lg">Heuristic Prep</div>
+    <nav class="flex gap-1 flex-wrap">${tabs.map(([k, n]) => `<button onclick="nav('${k}')" class="px-3 py-1.5 rounded-lg text-sm ${S.view === k ? 'bg-violet-600 text-white' : 'hover:bg-slate-100'}">${n}</button>`).join('')}</nav>
+    <div class="ml-auto flex items-center gap-3 text-sm">
+      ${both ? `<select onchange="S.exam=this.value;S.learn={};render()" class="border rounded-lg p-1"><option ${S.exam === 'NEET' ? 'selected' : ''}>NEET</option><option ${S.exam === 'JEE' ? 'selected' : ''}>JEE</option></select>`
+             : `<span class="px-2 py-1 rounded bg-violet-100 text-violet-700 font-medium">${esc(S.exam)}</span>`}
+      <span class="text-slate-500">${esc(u.name)}</span>
+      <button onclick="logout()" class="text-slate-400 hover:text-red-600">Logout</button>
+    </div></div></header>
+  <main id="main" class="max-w-5xl mx-auto p-4"></main>`;
+  ({ dashboard: viewDashboard, learn: viewLearn, test: viewTest, board: viewBoard, teacher: viewTeacher }[S.view])();
+}
+const card = (h, c = '') => `<div class="bg-white rounded-xl shadow-sm border p-5 ${c}">${h}</div>`;
+
+/* ---------------------------------------------------------- dashboard */
+async function viewDashboard() {
+  const m = $('#main'); m.innerHTML = '<div class="text-slate-400">Loading…</div>';
+  const a = await api('/analytics?exam=' + S.exam);
+  const stat = (n, l) => card(`<div class="text-3xl font-bold text-violet-700">${n}</div><div class="text-slate-500 text-sm">${l}</div>`);
+  m.innerHTML = `
+  <h2 class="text-xl font-semibold mb-3">${esc(S.exam)} progress</h2>
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+    ${stat(a.attempted, 'Questions attempted')}${stat(a.accuracy + '%', 'Overall accuracy')}${stat(a.avg_time + 's', 'Avg time / question')}${stat(a.tests.length, 'Recent tests')}
+  </div>
+  <div class="grid md:grid-cols-2 gap-4">
+    ${card(`<div class="font-semibold mb-3">Subject-wise accuracy</div>` + (a.subjects.length ? a.subjects.map(s => `
+      <div class="mb-3"><div class="flex justify-between text-sm"><span>${esc(s.subject)}</span><span>${s.accuracy}% (${s.attempted} Qs)</span></div>
+      <div class="h-2 bg-slate-100 rounded"><div class="bar h-2 rounded ${s.accuracy >= 60 ? 'bg-emerald-500' : 'bg-amber-500'}" style="width:${s.accuracy}%"></div></div></div>`).join('')
+      : '<div class="text-slate-400 text-sm">No attempts yet. Start in Learn mode.</div>'))}
+    ${card(`<div class="font-semibold mb-3">AI study recommendations</div><ul class="space-y-2 text-sm">${a.recommendations.map(r => `<li class="flex gap-2"><span>💡</span><span>${esc(r)}</span></li>`).join('')}</ul>`)}
+  </div>
+  ${card(`<div class="font-semibold mb-3">Recent tests</div>` + (a.tests.length ? `<table class="w-full text-sm"><tr class="text-left text-slate-400"><th>#</th><th>Type</th><th>Score</th></tr>${a.tests.map(t => `<tr class="border-t"><td>${t.id}</td><td>${esc(t.mode.replace('_', ' '))}</td><td>${t.score} / ${t.max_score}</td></tr>`).join('')}</table>` : '<div class="text-slate-400 text-sm">No tests taken yet.</div>'), 'mt-4')}`;
+}
+
+/* ---------------------------------------------------------- learn */
+function viewLearn() {
+  const m = $('#main'), subs = S.meta[S.exam] || {}, l = S.learn;
+  if (!l.qs) {
+    m.innerHTML = `<h2 class="text-xl font-semibold mb-3">Learning mode: ${esc(S.exam)}</h2>
+    <div class="grid md:grid-cols-3 gap-3">${Object.keys(subs).map(sub => card(`
+      <div class="font-semibold mb-2">${esc(sub)}</div>
+      <button onclick="startLearn('${sub}')" class="w-full text-left text-sm bg-violet-50 hover:bg-violet-100 text-violet-700 rounded-lg px-3 py-2 mb-1">All chapters</button>
+      ${subs[sub].map(ch => `<button onclick="startLearn('${sub}', this.dataset.c)" data-c="${esc(ch)}" class="w-full text-left text-sm hover:bg-slate-100 rounded-lg px-3 py-1.5">${esc(ch)}</button>`).join('')}`)).join('')}</div>`;
+    return;
+  }
+  const q = l.qs[l.i], r = l.result;
+  m.innerHTML = `
+  <div class="flex items-center justify-between mb-3"><button onclick="S.learn={};render()" class="text-sm text-violet-700">← Subjects</button>
+    <div class="text-sm text-slate-500">${esc(q.subject)} · ${esc(q.chapter)} · Q${l.i + 1}/${l.qs.length}</div></div>
+  <div class="grid md:grid-cols-2 gap-4"><div>${card(`
+    <div class="font-medium mb-4">${esc(q.text)}</div>
+    ${q.options.map((o, i) => {
+      let cls = 'border-slate-200';
+      if (r) { if (i === r.answer) cls = 'border-emerald-500 bg-emerald-50'; else if (i === l.sel) cls = 'border-red-500 bg-red-50'; }
+      return `<button ${r ? 'disabled' : ''} onclick="pick(${i})" class="opt w-full text-left border-2 ${cls} rounded-lg p-3 mb-2 text-sm"><b>${L(i)}.</b> ${esc(o)}</button>`; }).join('')}
+    ${r ? `<div class="mt-3 text-sm"><div class="font-semibold ${r.correct ? 'text-emerald-600' : 'text-red-600'}">${r.correct ? '✔ Correct!' : '✘ Incorrect. Answer: ' + L(r.answer)}</div>
+      <div class="mt-1 text-slate-600">${esc(r.explanation)}</div><div class="text-xs text-slate-400 mt-1">Source: ${esc(r.source)}</div>
+      <div class="flex gap-2 mt-3"><button ${l.i === 0 ? 'disabled' : ''} onclick="learnNav(-1)" class="px-3 py-1.5 border rounded-lg text-sm disabled:opacity-40">Prev</button>
+      <button ${l.i === l.qs.length - 1 ? 'disabled' : ''} onclick="learnNav(1)" class="px-3 py-1.5 bg-violet-600 text-white rounded-lg text-sm disabled:opacity-40">Next</button></div></div>` : ''}`)}</div>
+    <div>${card(chatShell(q.id))}</div></div>`;
+  renderChat(q.id);
+}
+async function startLearn(subject, chapter) {
+  const qs = await api(`/questions?exam=${S.exam}&subject=${encodeURIComponent(subject)}` + (chapter ? `&chapter=${encodeURIComponent(chapter)}` : ''));
+  S.learn = { qs, i: 0, result: null, sel: null, t0: Date.now() }; render();
+}
+async function pick(i) {
+  const l = S.learn, q = l.qs[l.i]; l.sel = i;
+  l.result = await api('/answer', 'POST', { question_id: q.id, selected: i, time_taken: (Date.now() - l.t0) / 1000 }); viewLearn();
+}
+function learnNav(d) { const l = S.learn; l.i += d; l.result = null; l.sel = null; l.t0 = Date.now(); viewLearn(); }
+
+/* ---------------------------------------------------------- chat + voice */
+function chatShell(qid) {
+  return `<div class="flex items-center justify-between mb-2"><div class="font-semibold">🤖 AI Doubt Assistant</div>
+    <label class="text-xs text-slate-500 flex items-center gap-1"><input type="checkbox" ${S.voice ? 'checked' : ''} onchange="S.voice=this.checked;if(!this.checked)speechSynthesis.cancel()"> Speak replies</label></div>
+    <div id="chatlog" class="h-72 overflow-y-auto bg-slate-50 rounded-lg p-3 text-sm space-y-2"></div>
+    <div class="flex gap-2 mt-2"><button onclick="mic(${qid})" title="Ask by voice" class="px-3 border rounded-lg hover:bg-violet-50">🎤</button>
+    <input id="chatin" class="flex-1 border rounded-lg p-2 text-sm" placeholder="Ask a doubt about this question…" onkeydown="if(event.key==='Enter')sendChat(${qid})">
+    <button onclick="sendChat(${qid})" class="px-4 bg-violet-600 text-white rounded-lg text-sm">Send</button></div>`;
+}
+function renderChat(qid) {
+  const log = $('#chatlog'); if (!log) return;
+  const h = S.chat[qid] || [];
+  log.innerHTML = h.length ? h.map(m => `<div class="${m.role === 'user' ? 'text-right' : ''}"><span class="inline-block px-3 py-2 rounded-xl whitespace-pre-wrap text-left ${m.role === 'user' ? 'bg-violet-600 text-white' : 'bg-white border'}">${esc(m.content)}</span></div>`).join('')
+    : '<div class="text-slate-400">Ask anything: why is option B correct? Explain the concept. Show another example…</div>';
+  log.scrollTop = log.scrollHeight;
+}
+async function sendChat(qid, textOverride) {
+  const inp = $('#chatin'), text = (textOverride || inp.value).trim(); if (!text) return;
+  inp.value = ''; const h = S.chat[qid] = S.chat[qid] || []; const history = h.slice();
+  h.push({ role: 'user', content: text }); h.push({ role: 'assistant', content: 'Thinking…' }); renderChat(qid);
+  try { const r = await api('/chat', 'POST', { question_id: qid, message: text, history }); h[h.length - 1].content = r.reply; speak(r.reply); }
+  catch (e) { h[h.length - 1].content = 'Error: ' + e.message; }
+  renderChat(qid);
+}
+function mic(qid) {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return alert('Voice input needs Chrome or Edge.');
+  const r = new SR(); r.lang = 'en-IN'; S.voice = true; r.onresult = e => sendChat(qid, e.results[0][0].transcript); r.start();
+}
+function speak(t) { if (!S.voice || !window.speechSynthesis) return; speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(t); u.lang = 'en-IN'; speechSynthesis.speak(u); }
+
+/* ---------------------------------------------------------- tests */
+async function viewTest() {
+  const m = $('#main'), subs = Object.keys(S.meta[S.exam] || {}), T = S.test;
+  if (T && T.result) return viewResult();
+  if (T) return viewTaking();
+  const papers = await api('/papers?exam=' + S.exam);
+  m.innerHTML = `<h2 class="text-xl font-semibold mb-3">Test mode: ${esc(S.exam)}</h2>
+  <div class="grid md:grid-cols-2 gap-4">
+   ${card(`<div class="font-semibold">Exact exam pattern</div><p class="text-sm text-slate-500 my-2">Timed, mixed subjects, +4 correct / −1 wrong marking, just like the real ${esc(S.exam)} paper (scaled down for the prototype).</p>
+     <button onclick="startTest('exam_pattern')" class="bg-violet-600 text-white rounded-lg px-4 py-2 text-sm">Start full test</button>`)}
+   ${card(`<div class="font-semibold">Subject-wise test</div><p class="text-sm text-slate-500 my-2">Focused practice on one subject.</p>
+     <div class="flex gap-2 flex-wrap">${subs.map(s => `<button onclick="startTest('chapter','${s}')" class="border border-violet-300 text-violet-700 hover:bg-violet-50 rounded-lg px-3 py-1.5 text-sm">${s}</button>`).join('')}</div>`)}
+   ${card(`<div class="font-semibold">Year-wise paper practice</div><p class="text-sm text-slate-500 my-2">Timed sets grouped by year. These 48 added questions are original mock practice, not official previous-year questions.</p>
+     <div class="flex gap-2 flex-wrap">${papers.map(p => `<button onclick="startTest('previous_year',null,${p.year})" class="border border-violet-300 text-violet-700 hover:bg-violet-50 rounded-lg px-3 py-1.5 text-sm">${esc(p.year)} Practice Set · ${p.questions} questions</button>`).join('')}</div>`)}
+  </div><div class="text-xs text-slate-400 mt-3">Use verified, licensed past-paper content before presenting any set as an official previous-year paper.</div>`;
+}
+async function startTest(mode, subject, paper_year) {
+  const r = await api('/tests/start', 'POST', { exam: S.exam, mode, subject, paper_year });
+  S.test = { id: r.test_id, qs: r.questions, answers: {}, times: {}, i: 0, deadline: Date.now() + r.duration_sec * 1000, q0: Date.now(), marking: r.marking };
+  render();
+  clearInterval(S.timer); S.timer = setInterval(tick, 1000);
+}
+function tick() {
+  const T = S.test; if (!T || T.result) return clearInterval(S.timer);
+  const left = Math.max(0, Math.round((T.deadline - Date.now()) / 1000)), el = $('#timer');
+  if (el) { el.textContent = String(Math.floor(left / 60)).padStart(2, '0') + ':' + String(left % 60).padStart(2, '0'); if (left < 60) el.classList.add('text-red-600'); }
+  if (left <= 0) submitTest();
+}
+function stamp() { const T = S.test, q = T.qs[T.i]; T.times[q.id] = (T.times[q.id] || 0) + (Date.now() - T.q0) / 1000; T.q0 = Date.now(); }
+function viewTaking() {
+  const T = S.test, q = T.qs[T.i], sel = T.answers[q.id];
+  $('#main').innerHTML = `
+  <div class="flex items-center justify-between mb-3"><div class="text-sm text-slate-500">${esc(S.exam)} test · +${T.marking.correct} / ${T.marking.wrong}</div>
+    <div class="font-mono text-xl font-bold" id="timer">--:--</div></div>
+  <div class="grid md:grid-cols-4 gap-4"><div class="md:col-span-3">${card(`
+    <div class="text-xs text-slate-400 mb-1">${esc(q.subject)} · Q${T.i + 1} of ${T.qs.length}</div>
+    <div class="font-medium mb-4">${esc(q.text)}</div>
+    ${q.options.map((o, i) => `<button onclick="selOpt(${q.id},${i})" class="opt w-full text-left border-2 ${sel === i ? 'border-violet-600 bg-violet-50' : 'border-slate-200'} rounded-lg p-3 mb-2 text-sm"><b>${L(i)}.</b> ${esc(o)}</button>`).join('')}
+    <div class="flex gap-2 mt-3"><button onclick="goQ(-1)" class="px-3 py-1.5 border rounded-lg text-sm">Prev</button>
+      <button onclick="clearOpt(${q.id})" class="px-3 py-1.5 border rounded-lg text-sm">Clear</button>
+      <button onclick="goQ(1)" class="px-3 py-1.5 bg-violet-600 text-white rounded-lg text-sm">Next</button>
+      <button onclick="if(confirm('Submit the test now?'))submitTest()" class="ml-auto px-4 py-1.5 bg-emerald-600 text-white rounded-lg text-sm">Submit</button></div>`)}</div>
+   <div>${card(`<div class="text-sm font-semibold mb-2">Question palette</div><div class="grid grid-cols-5 gap-1">${T.qs.map((x, i) => `<button onclick="jump(${i})" class="h-8 rounded text-xs ${i === T.i ? 'ring-2 ring-violet-600 ' : ''}${T.answers[x.id] != null ? 'bg-emerald-500 text-white' : 'bg-slate-100'}">${i + 1}</button>`).join('')}</div>`)}</div></div>`;
+  tick();
+}
+function selOpt(id, i) { S.test.answers[id] = i; viewTaking(); }
+function clearOpt(id) { delete S.test.answers[id]; viewTaking(); }
+function goQ(d) { const T = S.test; stamp(); T.i = Math.min(T.qs.length - 1, Math.max(0, T.i + d)); viewTaking(); }
+function jump(i) { stamp(); S.test.i = i; viewTaking(); }
+async function submitTest() {
+  const T = S.test; if (!T || T.submitting) return; T.submitting = true; stamp(); clearInterval(S.timer);
+  T.result = await api(`/tests/${T.id}/submit`, 'POST', { answers: T.answers, times: T.times }); render();
+}
+function viewResult() {
+  const r = S.test.result;
+  $('#main').innerHTML = `
+  ${card(`<div class="text-center"><div class="text-sm text-slate-500">Your score</div><div class="text-5xl font-bold text-violet-700">${r.score}<span class="text-xl text-slate-400"> / ${r.max_score}</span></div>
+    <div class="flex justify-center gap-6 mt-3 text-sm"><span class="text-emerald-600">✔ ${r.correct} correct</span><span class="text-red-600">✘ ${r.wrong} wrong</span><span class="text-slate-500">– ${r.skipped} skipped</span></div></div>`)}
+  <div class="grid md:grid-cols-3 gap-3 my-4">${Object.entries(r.by_subject).map(([s, v]) => card(`<div class="font-semibold">${esc(s)}</div><div class="text-2xl font-bold">${v.score}</div><div class="text-xs text-slate-500">${v.correct} right · ${v.wrong} wrong · ${v.skipped} skipped</div>`)).join('')}</div>
+  <h3 class="font-semibold mb-2">Review & explanations</h3>
+  ${r.review.map((q, n) => card(`<div class="text-xs text-slate-400">${esc(q.subject)} · ${esc(q.chapter)} · ${q.time}s</div>
+    <div class="font-medium my-1">${n + 1}. ${esc(q.text)}</div>
+    <div class="text-sm">Your answer: <b class="${q.selected === q.answer ? 'text-emerald-600' : 'text-red-600'}">${q.selected == null ? 'Skipped' : L(q.selected) + '. ' + esc(q.options[q.selected])}</b> · Correct: <b class="text-emerald-600">${L(q.answer)}. ${esc(q.options[q.answer])}</b></div>
+    <div class="text-sm text-slate-600 mt-1">${esc(q.explanation)}</div>`, 'mb-2')).join('')}
+  <button onclick="S.test=null;render()" class="mt-3 bg-violet-600 text-white rounded-lg px-4 py-2 text-sm">Back to tests</button>`;
+}
+
+/* ---------------------------------------------------------- leaderboard */
+async function viewBoard() {
+  const m = $('#main'); m.innerHTML = 'Loading…';
+  const rows = await api('/leaderboard?exam=' + S.exam);
+  m.innerHTML = `<h2 class="text-xl font-semibold mb-1">🏆 ${esc(S.exam)} leaderboard</h2><div class="text-sm text-slate-500 mb-3">Ranked by total test score. NEET and JEE are tracked separately.</div>
+  ${card(rows.length ? `<table class="w-full text-sm"><tr class="text-left text-slate-400"><th class="py-1">Rank</th><th>Student</th><th>Class</th><th>Tests</th><th>Best</th><th>Total</th></tr>
+    ${rows.map(r => `<tr class="border-t ${r.you ? 'bg-violet-50 font-semibold' : ''}"><td class="py-2">${r.rank <= 3 ? ['🥇', '🥈', '🥉'][r.rank - 1] : r.rank}</td><td>${esc(r.name)}${r.you ? ' (you)' : ''}</td><td>${esc(r.class_level)}</td><td>${r.tests}</td><td>${r.best}</td><td>${r.total}</td></tr>`).join('')}</table>` : '<div class="text-slate-400">No scores yet.</div>')}`;
+}
+
+/* ---------------------------------------------------------- teacher */
+async function viewTeacher() {
+  const m = $('#main'); m.innerHTML = 'Loading…';
+  const d = await api('/teacher/overview?exam=' + S.exam);
+  m.innerHTML = `<h2 class="text-xl font-semibold mb-3">Teacher view: ${esc(S.exam)} students (${d.count})</h2>
+  ${card(`<table class="w-full text-sm"><tr class="text-left text-slate-400"><th class="py-1">Student</th><th>Class</th><th>Track</th><th>Qs attempted</th><th>Accuracy</th><th>Tests</th><th>Avg test score</th></tr>
+   ${d.students.map(s => `<tr class="border-t"><td class="py-2">${esc(s.name)}</td><td>${esc(s.class)}</td><td>${esc(s.track)}</td><td>${s.attempted}</td><td>${s.accuracy == null ? '–' : s.accuracy + '%'}</td><td>${s.tests}</td><td>${s.avg_score_pct == null ? '–' : s.avg_score_pct + '%'}</td></tr>`).join('')}</table>`)}`;
+}
+
+boot();
+</script>
+</body>
+</html>

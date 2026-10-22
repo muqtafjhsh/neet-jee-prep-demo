@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: heuristic-prep-demo
+    runtime: python
+    plan: free
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: cd backend && python -m uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: DATABASE_PATH
+        value: /tmp/neet-jee-prep-demo.db
+      - key: TEACHER_CODE
+        generateValue: true
